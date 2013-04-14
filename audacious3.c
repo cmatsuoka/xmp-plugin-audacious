@@ -6,6 +6,8 @@
 
 /* Audacious 3.0 port/rewrite for Fedora by Michael Schwendt
  * TODO: list of supported formats missing in 'About' dialog
+ *
+ * Ported for libxmp 4.0 by Claudio Matsuoka, 2013-04-13
  */
 
 #include <stdlib.h>
@@ -22,10 +24,12 @@
 #include <audacious/misc.h>
 #include <audacious/preferences.h>
 #include <libaudgui/libaudgui-gtk.h>
+#include <xmp.h>
 
-#include "xmp.h"
-#include "common.h"
-#include "driver.h"
+#ifdef DEBUG
+#else
+#define _D(x...)
+#endif
 
 static GMutex *seek_mutex;
 static GCond *seek_cond;
@@ -65,7 +69,7 @@ typedef struct {
 	struct xmp_module_info mod_info;
 } XMPConfig;
 
-XMPConfig xmp_cfg;
+XMPConfig plugin_cfg;
 
 static const gchar* const plugin_defaults[] = {
     "mixing_freq", "0",
@@ -139,24 +143,7 @@ static void mseek(InputPlayback *playback, gint msec)
 
 static void seek_ctx(gint time)
 {
-	int i, t;
-	struct xmp_player_context *p = &((struct xmp_context *)ctx)->p;
-
-	_D("seek to %ld, total %d", time, xmp_cfg.time);
-
-	for (i = 0; i < xmp_cfg.mod_info.len; i++) {
-		t = p->m.xxo_info[i].time;
-
-		_D("%2d: %ld %d", i, time, t);
-
-		if (t > time) {
-			int a;
-			if (i > 0)
-				i--;
-			a = xmp_ord_set(ctx, i);
-			break;
-		}
-	}
+	xmp_seek_time(ctx, time);
 }
 
 
@@ -173,31 +160,30 @@ static void mod_pause(InputPlayback *playback, gboolean p)
 static gboolean init(void)
 {
 	_D("Plugin init");
-	xmp_drv_register(&drv_smix);
 	ctx = xmp_create_context();
 
-    probe_mutex = g_mutex_new();
+	probe_mutex = g_mutex_new();
 	jumpToTime = -1;
 	seek_mutex = g_mutex_new();
 	seek_cond = g_cond_new();
 
-    aud_config_set_defaults("XMP",plugin_defaults);
+	aud_config_set_defaults("XMP",plugin_defaults);
 
-#define CFGREADINT(x) xmp_cfg.x = aud_get_int ("XMP", #x)
+#define CFGREADINT(x) plugin_cfg.x = aud_get_int ("XMP", #x)
 
-		CFGREADINT(mixing_freq);
-		CFGREADINT(force8bit);
-		CFGREADINT(convert8bit);
-		CFGREADINT(modrange);
-		CFGREADINT(fixloops);
-		CFGREADINT(force_mono);
-		CFGREADINT(interpolation);
-		CFGREADINT(filter);
-		CFGREADINT(pan_amplitude);
+	CFGREADINT(mixing_freq);
+	CFGREADINT(force8bit);
+	CFGREADINT(convert8bit);
+	CFGREADINT(modrange);
+	CFGREADINT(fixloops);
+	CFGREADINT(force_mono);
+	CFGREADINT(interpolation);
+	CFGREADINT(filter);
+	CFGREADINT(pan_amplitude);
 
 	configure_init();
 
-	xmp_init(ctx, 0, NULL);
+	//xmp_init(ctx, 0, NULL);
 
 	return TRUE;
 }
@@ -220,7 +206,7 @@ static int is_our_file_from_vfs(const char* _filename, VFSFile *vfsfile)
 	_D("filename = %s", filename);
 	strip_vfs(filename);		/* Sorry, no VFS support */
 
-	ret = (xmp_test_module(ctx, filename, NULL) == 0);
+	ret = (xmp_test_module(filename, NULL) == 0);
 
 	g_free(filename);
 	return ret;
@@ -234,15 +220,14 @@ Tuple *probe_for_tuple(const gchar *_filename, VFSFile *fd)
 	int len;
 	Tuple *tuple;
 	struct xmp_module_info mi;
-	struct xmp_options *opt;
 
 	g_mutex_lock(probe_mutex);
 	_D("filename = %s", filename);
 	strip_vfs(filename);		/* Sorry, no VFS support */
 
 	ctx = xmp_create_context();
-	opt = xmp_get_options(ctx);
-	opt->skipsmp = 1;	/* don't load samples */
+	//opt = xmp_get_options(ctx);
+	//opt->skipsmp = 1;	/* don't load samples */
 	len = xmp_load_module(ctx, filename);
 
 	if (len < 0) {
@@ -255,35 +240,34 @@ Tuple *probe_for_tuple(const gchar *_filename, VFSFile *fd)
 	xmp_get_module_info(ctx, &mi);
 
 	tuple = tuple_new_from_filename(filename);
-    g_free(filename);
-	tuple_set_str(tuple, FIELD_TITLE, NULL, mi.name);
-	tuple_set_str(tuple, FIELD_CODEC, NULL, mi.type);
+	g_free(filename);
+	tuple_set_str(tuple, FIELD_TITLE, NULL, mi.mod->name);
+	tuple_set_str(tuple, FIELD_CODEC, NULL, mi.mod->type);
 	tuple_set_int(tuple, FIELD_LENGTH, NULL, len);
 
 	xmp_release_module(ctx);
 	xmp_free_context(ctx);
 
-    g_mutex_unlock(probe_mutex);
+	g_mutex_unlock(probe_mutex);
 	return tuple;
 }
 
 
 static gboolean play(InputPlayback *ipb, const gchar *_filename, VFSFile *file, gint start_time, gint stop_time, gboolean pause)
 {
-	int channelcnt = 1;
+	int channelcnt;
 	FILE *f;
-	struct xmp_options *opt;
-	int lret, fmt, nch;
-	void *data;
-	int size;
+	struct xmp_frame_info fi;
+	int lret, fmt;
 	gchar *filename = g_strdup(_filename);
 	Tuple *tuple;
+	int freq, resol, flags, dsp;
 	
 	_D("play: %s\n", filename);
 	if (file == NULL) {
 		return FALSE;
 	}
-	opt = xmp_get_options(ctx);
+	//opt = xmp_get_options(ctx);
 
 	strip_vfs(filename);  /* Sorry, no VFS support */
 
@@ -297,77 +281,77 @@ static gboolean play(InputPlayback *ipb, const gchar *_filename, VFSFile *file, 
 	}
 	fclose(f);
 
-	opt->resol = 8;
-	opt->verbosity = 0;
-	opt->drv_id = "smix";
+	resol = 8;
+	flags = 0;
+	channelcnt = 1;
 
-	switch (xmp_cfg.mixing_freq) {
+	switch (plugin_cfg.mixing_freq) {
 	case 1:
-		opt->freq = 22050;	/* 1:2 mixing freq */
+		freq = 22050;		/* 1:2 mixing freq */
 		break;
 	case 2:
-		opt->freq = 11025;	/* 1:4 mixing freq */
+		freq = 11025;		/* 1:4 mixing freq */
 		break;
 	default:
-		opt->freq = 44100;	/* standard mixing freq */
+		freq = 44100;		/* standard mixing freq */
 		break;
 	}
 
-	if (xmp_cfg.force8bit == 0)
-		opt->resol = 16;
+	if (plugin_cfg.force8bit == 0)
+		resol = 16;
 
-	if (xmp_cfg.force_mono == 0) {
+	if (plugin_cfg.force_mono == 0) {
 		channelcnt = 2;
-		opt->outfmt &= ~XMP_FMT_MONO;
+		flags &= ~XMP_FORMAT_MONO;
 	} else {
-		opt->outfmt |= XMP_FMT_MONO;
+		flags |= XMP_FORMAT_MONO;
 	}
 
-	if (xmp_cfg.interpolation == 1)
-		opt->flags |= XMP_CTL_ITPT;
+	if (plugin_cfg.interpolation == 1)
+		xmp_set_player(ctx, XMP_PLAYER_INTERP, XMP_INTERP_SPLINE);
 	else
-		opt->flags &= ~XMP_CTL_ITPT;
+		xmp_set_player(ctx, XMP_PLAYER_INTERP, XMP_INTERP_NEAREST);
 
-	if (xmp_cfg.filter == 1)
-		opt->flags |= XMP_CTL_FILTER;
+	dsp = xmp_get_player(ctx, XMP_PLAYER_DSP);
+	if (plugin_cfg.filter == 1)
+		dsp |= XMP_DSP_LOWPASS;
 	else
-		opt->flags &= ~XMP_CTL_FILTER;
+		dsp &= ~XMP_DSP_LOWPASS;
 
-	opt->mix = xmp_cfg.pan_amplitude;
+	xmp_set_player(ctx, XMP_PLAYER_MIX, plugin_cfg.pan_amplitude);
 
-	fmt = opt->resol == 16 ? FMT_S16_NE : FMT_U8;
-	nch = opt->outfmt & XMP_FMT_MONO ? 1 : 2;
+	fmt = resol == 16 ? FMT_S16_NE : FMT_U8;
 	
-	if (!ipb->output->open_audio(fmt, opt->freq, nch)) {
+	if (!ipb->output->open_audio(fmt, freq, channelcnt)) {
 		goto PLAY_ERROR_1;
 	}
 
-	xmp_open_audio(ctx);
+	//xmp_open_audio(ctx);
 
 	_D("*** loading: %s", filename);
 
 	lret =  xmp_load_module(ctx, filename);
 
 	if (lret < 0) {
-		xmp_close_audio(ctx);
+		//xmp_close_audio(ctx);
 		goto PLAY_ERROR_1;
 	}
 
-	xmp_cfg.time = lret;
-	xmp_get_module_info(ctx, &xmp_cfg.mod_info);
+	//plugin_cfg.time = lret;
+	xmp_get_module_info(ctx, &plugin_cfg.mod_info);
 
 	tuple = tuple_new_from_filename(filename);
 	g_free(filename);
-	tuple_set_str(tuple, FIELD_TITLE, NULL, xmp_cfg.mod_info.name);
-	tuple_set_str(tuple, FIELD_CODEC, NULL, xmp_cfg.mod_info.type);
+	tuple_set_str(tuple, FIELD_TITLE, NULL, plugin_cfg.mod_info.mod->name);
+	tuple_set_str(tuple, FIELD_CODEC, NULL, plugin_cfg.mod_info.mod->type);
 	tuple_set_int(tuple, FIELD_LENGTH, NULL, lret);
 	ipb->set_tuple(ipb, tuple);
 
-	ipb->set_params(ipb, xmp_cfg.mod_info.chn * 1000, opt->freq, channelcnt);
+	ipb->set_params(ipb, plugin_cfg.mod_info.mod->chn * 1000, freq, channelcnt);
 	ipb->set_pb_ready(ipb);
 
 	stop_flag = FALSE;
-	xmp_player_start(ctx);
+	xmp_start_player(ctx, freq, flags);
 
 	while (!stop_flag) {
 		if (stop_time >= 0 && ipb->output->written_time() >= stop_time) {
@@ -383,13 +367,13 @@ static gboolean play(InputPlayback *ipb, const gchar *_filename, VFSFile *file, 
 		}
 		g_mutex_unlock(seek_mutex);
 
-		xmp_get_buffer(ctx, &data, &size);
+		xmp_get_frame_info(ctx, &fi);
 
         	if (!stop_flag && jumpToTime < 0) {
-			ipb->output->write_audio(data, size);
+			ipb->output->write_audio(fi.buffer, fi.buffer_size);
         	}
 
-		if ((xmp_player_frame(ctx) != 0) && jumpToTime < 0) {
+		if ((xmp_play_frame(ctx) != 0) && jumpToTime < 0) {
 			stop_flag = TRUE;
  DRAIN:
 			break;
@@ -401,9 +385,9 @@ static gboolean play(InputPlayback *ipb, const gchar *_filename, VFSFile *file, 
 	g_cond_signal(seek_cond);  /* wake up any waiting request */
 	g_mutex_unlock(seek_mutex);
 
-	xmp_player_end(ctx);
+	xmp_end_player(ctx);
 	xmp_release_module(ctx);
-	xmp_close_audio(ctx);
+	//xmp_close_audio(ctx);
 	return TRUE;
 
  PLAY_ERROR_1:
@@ -414,29 +398,27 @@ static gboolean play(InputPlayback *ipb, const gchar *_filename, VFSFile *file, 
 
 static void configure_apply()
 {
-	struct xmp_options *opt;
-
 	/* transfer Preferences UI config values back into XMPConfig */
 	if (guicfg.freq11) {
-		xmp_cfg.mixing_freq = FREQ_SAMPLE_11;
+		plugin_cfg.mixing_freq = FREQ_SAMPLE_11;
 	} else if (guicfg.freq22) {
-		xmp_cfg.mixing_freq = FREQ_SAMPLE_22;
+		plugin_cfg.mixing_freq = FREQ_SAMPLE_22;
 	} else {  /* if (guicfg.freq44) { */
-		xmp_cfg.mixing_freq = FREQ_SAMPLE_44;
+		plugin_cfg.mixing_freq = FREQ_SAMPLE_44;
 	}
 
-	xmp_cfg.convert8bit = guicfg.bits8;
-	xmp_cfg.force_mono = guicfg.mono;
-	xmp_cfg.fixloops = guicfg.fixloops;
-	xmp_cfg.modrange = guicfg.modrange;
-	xmp_cfg.interpolation = guicfg.interpolation;
-	xmp_cfg.filter = guicfg.filter;
-	xmp_cfg.pan_amplitude = (gint)guicfg.panamp;
+	plugin_cfg.convert8bit = guicfg.bits8;
+	plugin_cfg.force_mono = guicfg.mono;
+	plugin_cfg.fixloops = guicfg.fixloops;
+	plugin_cfg.modrange = guicfg.modrange;
+	plugin_cfg.interpolation = guicfg.interpolation;
+	plugin_cfg.filter = guicfg.filter;
+	plugin_cfg.pan_amplitude = (gint)guicfg.panamp;
 
-	opt = xmp_get_options(ctx);
-	opt->mix = xmp_cfg.pan_amplitude;
+	//opt = xmp_get_options(ctx);
+	xmp_set_player(ctx, XMP_PLAYER_MIX, plugin_cfg.pan_amplitude);
 
-#define CFGWRITEINT(x) aud_set_int ("XMP", #x, xmp_cfg.x)
+#define CFGWRITEINT(x) aud_set_int ("XMP", #x, plugin_cfg.x)
 
 	CFGWRITEINT(mixing_freq);
 	CFGWRITEINT(force8bit);
@@ -453,22 +435,22 @@ static void configure_init(void)
 {
 	/* transfer XMPConfig into Preferences UI config */
 	/* keeping compatibility with older releases */
-	guicfg.freq11 = (xmp_cfg.mixing_freq == FREQ_SAMPLE_11);
-	guicfg.freq22 = (xmp_cfg.mixing_freq == FREQ_SAMPLE_22);
-	guicfg.freq44 = (xmp_cfg.mixing_freq == FREQ_SAMPLE_44);
-	guicfg.mono = xmp_cfg.force_mono;
-	guicfg.stereo = !xmp_cfg.force_mono;
-	guicfg.bits8 = xmp_cfg.convert8bit;
-	guicfg.bits16 = !xmp_cfg.convert8bit;
-	guicfg.convert8bit = xmp_cfg.convert8bit;
-	guicfg.fixloops = xmp_cfg.fixloops;
-	guicfg.modrange = xmp_cfg.modrange;
-	guicfg.interpolation = xmp_cfg.interpolation;
-	guicfg.filter = xmp_cfg.filter;
-	guicfg.panamp = xmp_cfg.pan_amplitude;
+	guicfg.freq11 = (plugin_cfg.mixing_freq == FREQ_SAMPLE_11);
+	guicfg.freq22 = (plugin_cfg.mixing_freq == FREQ_SAMPLE_22);
+	guicfg.freq44 = (plugin_cfg.mixing_freq == FREQ_SAMPLE_44);
+	guicfg.mono = plugin_cfg.force_mono;
+	guicfg.stereo = !plugin_cfg.force_mono;
+	guicfg.bits8 = plugin_cfg.convert8bit;
+	guicfg.bits16 = !plugin_cfg.convert8bit;
+	guicfg.convert8bit = plugin_cfg.convert8bit;
+	guicfg.fixloops = plugin_cfg.fixloops;
+	guicfg.modrange = plugin_cfg.modrange;
+	guicfg.interpolation = plugin_cfg.interpolation;
+	guicfg.filter = plugin_cfg.filter;
+	guicfg.panamp = plugin_cfg.pan_amplitude;
 }
 
-void xmp_aud_about()
+void plugin_aud_about()
 {
 	static GtkWidget *about_window = NULL;
 
@@ -593,14 +575,14 @@ static PreferencesWidget prefs[] = {
 	},
 };
 
-PluginPreferences xmp_aud_preferences = {
-	.widgets = prefs,
-	.n_widgets = G_N_ELEMENTS(prefs),
+PluginPreferences plugin_aud_preferences = {
+	.prefs = prefs,
+	.n_prefs = G_N_ELEMENTS(prefs),
 	.init = configure_init,
 	.apply = configure_apply,
 };
 
-/* Filtering files by suffix is really stupid. */
+/* Filtering files by suffix isn't good for modules. */
 const gchar* const fmts[] = {
 	"xm", "mod", "m15", "it", "s2m", "s3m", "stm", "stx", "med", "dmf",
 	"mtm", "ice", "imf", "ptm", "mdl", "ult", "liq", "psm", "amf",
@@ -610,19 +592,11 @@ const gchar* const fmts[] = {
 	"zen", "crb", "tdd", "gmc", "gdm", "mdz", "xmz", "s3z", "j2b", NULL
 };
 
-#ifndef AUD_INPUT_PLUGIN
-#define AUD_INPUT_PLUGIN(x...) InputPlugin xmp_ip = { x };
-#endif
-
 AUD_INPUT_PLUGIN (
-#if _AUD_PLUGIN_VERSION > 20
 	.name		= "XMP Plugin " VERSION,
-#else
-	.description	= "XMP Plugin " VERSION,
-#endif
 	.init		= init,
-	.about		= xmp_aud_about,
-	.prefs		= &xmp_aud_preferences,
+	.about		= plugin_aud_about,
+	.settings	= &plugin_aud_preferences,
 	.play		= play,
 	.stop		= stop,
 	.pause		= mod_pause,
@@ -630,15 +604,6 @@ AUD_INPUT_PLUGIN (
 	.is_our_file_from_vfs = is_our_file_from_vfs,
 	.cleanup	= cleanup,
 	.mseek		= mseek,
-#if _AUD_PLUGIN_VERSION > 20
 	.extensions	= fmts,
-#else
-	.vfs_extensions	= fmts,
-#endif
 )
 
-#if _AUD_PLUGIN_VERSION <= 20
-static InputPlugin *xmp_iplist[] = { &xmp_ip, NULL };
-
-SIMPLE_INPUT_PLUGIN(xmp, xmp_iplist);
-#endif

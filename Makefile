@@ -1,12 +1,11 @@
-VERSION	= 4.0
+VERSION	= 4.0.0
 
 CC		= gcc
-CFLAGS		= -c -Wall -g -O2   \
+CFLAGS		= -c -Wall -g -O2 -fPIC -D_REENTRANT \
 		  `pkg-config --cflags libxmp audacious gtk+-3.0 glib-2.0`
 LD		= gcc
-LDFLAGS		=  \
-		  `pkg-config --libs libxmp audacious gtk+-3.0 glib-2.0`
-LIBS		= 
+LDFLAGS		= 
+LIBS		= `pkg-config --libs libxmp audacious gtk+-3.0 glib-2.0`
 INSTALL		= /usr/bin/install -c
 PLUGIN_DIR	= `pkg-config --variable input_plugin_dir audacious`
 DESTDIR		=
@@ -24,14 +23,17 @@ CFLAGS += -I. -DVERSION=\"$(VERSION)\"
 
 .SUFFIXES: .c .o .lo .a .so .dll
 
-.c.o:
-	@CMD='$(CC) $(CFLAGS) -o $*.o $<'; \
-	if [ "$(V)" -gt 0 ]; then echo $$CMD; else echo CC $*.o ; fi; \
+.c.lo:
+	@CMD='$(CC) $(CFLAGS) -fPIC -o $*.lo $<'; \
+	if [ "$(V)" -gt 0 ]; then echo $$CMD; else echo CC $*.lo ; fi; \
 	eval $$CMD
 
 binaries: xmp-audacious3.so
 
-xmp-audacious3.so: audacious3.o
+xmp-audacious3.so: audacious3.lo
+	@CMD='$(LD) -shared -o $@ $(LDFLAGS) $+ $(LIBS)'; \
+	if [ "$(V)" -gt 0 ]; then echo $$CMD; else echo LD $@ ; fi; \
+	eval $$CMD
 
 clean:
 	@rm -f $(OBJS)
