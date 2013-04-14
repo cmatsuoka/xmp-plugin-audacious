@@ -216,24 +216,35 @@ static int is_our_file_from_vfs(const char* _filename, VFSFile *vfsfile)
 Tuple *probe_for_tuple(const gchar *_filename, VFSFile *fd)
 {
 	gchar *filename = g_strdup(_filename);
+	xmp_context ctx;
 	Tuple *tuple;
-	struct xmp_test_info info;
+	struct xmp_module_info mi;
+	struct xmp_frame_info fi;
 
 	g_mutex_lock(probe_mutex);
 	_D("filename = %s", filename);
 	strip_vfs(filename);		/* Sorry, no VFS support */
 
-	if (xmp_test_module(filename, &info) < 0) {
+	ctx = xmp_create_context();
+	xmp_enable_sample_load(ctx, 0);
+	if (xmp_load_module(ctx, filename) < 0) {
         	g_free(filename);
+		xmp_free_context(ctx);
         	g_mutex_unlock(probe_mutex);
 		return NULL;
 	}
 
+	xmp_get_module_info(ctx, &mi);
+	xmp_get_frame_info(ctx, &fi);
+
 	tuple = tuple_new_from_filename(filename);
 	g_free(filename);
-	tuple_set_str(tuple, FIELD_TITLE, NULL, info.name);
-	tuple_set_str(tuple, FIELD_CODEC, NULL, info.type);
-	//tuple_set_int(tuple, FIELD_LENGTH, NULL, len);
+	tuple_set_str(tuple, FIELD_TITLE, NULL, mi.mod->name);
+	tuple_set_str(tuple, FIELD_CODEC, NULL, mi.mod->type);
+	tuple_set_int(tuple, FIELD_LENGTH, NULL, fi.total_time);
+
+	xmp_release_module(ctx);
+	xmp_free_context(ctx);
 
 	g_mutex_unlock(probe_mutex);
 
