@@ -226,7 +226,10 @@ Tuple *probe_for_tuple(const gchar *_filename, VFSFile *fd)
 	strip_vfs(filename);		/* Sorry, no VFS support */
 
 	ctx = xmp_create_context();
-	xmp_enable_sample_load(ctx, 0);
+
+	/* don't load samples */
+	xmp_set_player(ctx, XMP_PLAYER_SMPCTL, XMP_SMPCTL_SKIP);
+
 	if (xmp_load_module(ctx, filename) < 0) {
         	g_free(filename);
 		xmp_free_context(ctx);
