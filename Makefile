@@ -2,10 +2,10 @@ VERSION	= 4.0.0
 
 CC		= gcc
 CFLAGS		= -c -Wall -g -O2 -fPIC -D_REENTRANT \
-		  `pkg-config --cflags libxmp audacious gtk+-3.0 glib-2.0`
+		  `pkg-config --cflags libxmp audacious glib-2.0`
 LD		= gcc
 LDFLAGS		= 
-LIBS		= `pkg-config --libs libxmp audacious gtk+-3.0 glib-2.0`
+LIBS		= `pkg-config --libs libxmp audacious glib-2.0`
 INSTALL		= /usr/bin/install -c
 PLUGIN_DIR	= `pkg-config --variable input_plugin_dir audacious`
 DESTDIR		=
