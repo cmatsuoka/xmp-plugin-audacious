@@ -19,11 +19,9 @@
 #include <ctype.h>
 
 #include <glib.h>
-#include <gtk/gtk.h>
 #include <audacious/plugin.h>
 #include <audacious/misc.h>
 #include <audacious/preferences.h>
-#include <libaudgui/libaudgui-gtk.h>
 #include <xmp.h>
 
 #ifdef DEBUG
@@ -452,28 +450,19 @@ static void configure_init(void)
 	guicfg.panamp = plugin_cfg.pan_amplitude;
 }
 
-void plugin_aud_about()
-{
-	static GtkWidget *about_window = NULL;
-
-	audgui_simple_message(&about_window, GTK_MESSAGE_INFO,
-                          g_strdup_printf(
-                "Extended Module Player %s", VERSION),
-                "Written by Claudio Matsuoka and Hipolito Carraro Jr.\n"
-                "\n"
-		"Audacious 3 plugin by Michael Schwendt\n"
-                "\n"
-                "Portions Copyright (C) 1998,2000 Olivier Lapicque,\n"
-                "(C) 1998 Tammo Hinrichs, (C) 1998 Sylvain Chipaux,\n"
-                "(C) 1997 Bert Jahn, (C) 1999 Tatsuyuki Satoh, (C)\n"
-                "1995-1999 Arnaud Carre, (C) 2001-2006 Russell Marks,\n"
-		"(C) 2005-2006 Michael Kohn\n"
-                "\n"
-		/* TODO: list */
-		/* "Supported module formats:" */
-	);
-}
-
+static const char plugin_aud_about[] =
+    "Extended Module Player " VERSION "\n"
+    "Written by Claudio Matsuoka and Hipolito Carraro Jr.\n"
+    "\n"
+    "Audacious 3 plugin by Michael Schwendt\n"
+    "\n"
+    "Portions Copyright (C) 1998,2000 Olivier Lapicque,\n"
+    "(C) 1998 Tammo Hinrichs, (C) 1998 Sylvain Chipaux,\n"
+    "(C) 1997 Bert Jahn, (C) 1999 Tatsuyuki Satoh, (C)\n"
+    "1995-1999 Arnaud Carre, (C) 2001-2006 Russell Marks,\n"
+	"(C) 2005-2006 Michael Kohn\n"
+    "\n";
+	/* TODO: list supported module formats:" */
 
 static PreferencesWidget prefs_precision[] = {
 	{ WIDGET_RADIO_BTN, "16 bit", &guicfg.bits16,
@@ -578,8 +567,8 @@ static PreferencesWidget prefs[] = {
 };
 
 PluginPreferences plugin_aud_preferences = {
-	.prefs = prefs,
-	.n_prefs = G_N_ELEMENTS(prefs),
+	.widgets = prefs,
+	.n_widgets = G_N_ELEMENTS(prefs),
 	.init = configure_init,
 	.apply = configure_apply,
 };
@@ -597,8 +586,8 @@ const gchar* const fmts[] = {
 AUD_INPUT_PLUGIN (
 	.name		= "XMP Plugin " VERSION,
 	.init		= init,
-	.about		= plugin_aud_about,
-	.settings	= &plugin_aud_preferences,
+	.about_text = plugin_aud_about,
+	.prefs		= &plugin_aud_preferences,
 	.play		= play,
 	.stop		= stop,
 	.pause		= mod_pause,
