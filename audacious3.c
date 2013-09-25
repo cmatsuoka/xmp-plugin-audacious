@@ -22,6 +22,9 @@
 #include <audacious/plugin.h>
 #include <audacious/misc.h>
 #include <audacious/preferences.h>
+#if _AUD_PLUGIN_VERSION >= 45
+#include <audacious/input.h>
+#endif
 #include <xmp.h>
 
 #ifdef DEBUG
@@ -29,10 +32,12 @@
 #define _D(x...)
 #endif
 
+#if _AUD_PLUGIN_VERSION < 45
 static GMutex *seek_mutex;
 static GCond *seek_cond;
 static gint jumpToTime = -1;
 static gboolean stop_flag = FALSE;
+#endif
 static GMutex *probe_mutex;
 
 static xmp_context ctx;
@@ -112,6 +117,7 @@ static void strip_vfs(char *s) {
 }
 
 
+#if _AUD_PLUGIN_VERSION < 45
 static void stop(InputPlayback *playback)
 {
 	_D("*** stop!");
@@ -139,12 +145,6 @@ static void mseek(InputPlayback *playback, gint msec)
 }
 
 
-static void seek_ctx(gint time)
-{
-	xmp_seek_time(ctx, time);
-}
-
-
 static void mod_pause(InputPlayback *playback, gboolean p)
 {
 	g_mutex_lock(seek_mutex);
@@ -152,6 +152,13 @@ static void mod_pause(InputPlayback *playback, gboolean p)
 		playback->output->pause(p);
 	}
 	g_mutex_unlock(seek_mutex);
+}
+#endif /* AUD API < 45 */
+
+
+static void seek_ctx(gint time)
+{
+	xmp_seek_time(ctx, time);
 }
 
 
@@ -161,9 +168,11 @@ static gboolean init(void)
 	ctx = xmp_create_context();
 
 	probe_mutex = g_mutex_new();
+#if _AUD_PLUGIN_VERSION < 45
 	jumpToTime = -1;
 	seek_mutex = g_mutex_new();
 	seek_cond = g_cond_new();
+#endif
 
 	aud_config_set_defaults("XMP",plugin_defaults);
 
@@ -189,8 +198,10 @@ static gboolean init(void)
 
 static void cleanup()
 {
+#if _AUD_PLUGIN_VERSION < 45
 	g_cond_free(seek_cond);
 	g_mutex_free(seek_mutex);
+#endif
     g_mutex_free(probe_mutex);
 	xmp_free_context(ctx);
 }
@@ -253,7 +264,11 @@ Tuple *probe_for_tuple(const gchar *_filename, VFSFile *fd)
 }
 
 
+#if _AUD_PLUGIN_VERSION < 45
 static gboolean play(InputPlayback *ipb, const gchar *_filename, VFSFile *file, gint start_time, gint stop_time, gboolean pause)
+#else
+static gboolean play(const gchar *_filename, VFSFile *file)
+#endif
 {
 	int channelcnt;
 	FILE *f;
@@ -273,8 +288,10 @@ static gboolean play(InputPlayback *ipb, const gchar *_filename, VFSFile *file, 
 
 	_D("play_file: %s", filename);
 
+#if _AUD_PLUGIN_VERSION < 45
 	jumpToTime = (start_time > 0) ? start_time : -1;
 	stop_flag = FALSE;
+#endif
 
 	if ((f = fopen(filename, "rb")) == 0) {
 		goto PLAY_ERROR_1;
@@ -322,7 +339,11 @@ static gboolean play(InputPlayback *ipb, const gchar *_filename, VFSFile *file, 
 
 	fmt = resol == 16 ? FMT_S16_NE : FMT_U8;
 	
+#if _AUD_PLUGIN_VERSION < 45
 	if (!ipb->output->open_audio(fmt, freq, channelcnt)) {
+#else
+	if (!aud_input_open_audio(fmt, freq, channelcnt)) {
+#endif
 		goto PLAY_ERROR_1;
 	}
 
@@ -345,14 +366,22 @@ static gboolean play(InputPlayback *ipb, const gchar *_filename, VFSFile *file, 
 	tuple_set_str(tuple, FIELD_TITLE, NULL, plugin_cfg.mod_info.mod->name);
 	tuple_set_str(tuple, FIELD_CODEC, NULL, plugin_cfg.mod_info.mod->type);
 	tuple_set_int(tuple, FIELD_LENGTH, NULL, lret);
+#if _AUD_PLUGIN_VERSION < 45
 	ipb->set_tuple(ipb, tuple);
 
 	ipb->set_params(ipb, plugin_cfg.mod_info.mod->chn * 1000, freq, channelcnt);
 	ipb->set_pb_ready(ipb);
 
 	stop_flag = FALSE;
+#else
+    aud_input_set_tuple(tuple);
+    // TODO: displays '4 kbps' instead of '4 channels'
+    //aud_input_set_bitrate(plugin_cfg.mod_info.mod->chn*1000);
+#endif
+
 	xmp_start_player(ctx, freq, flags);
 
+#if _AUD_PLUGIN_VERSION < 45
 	while (!stop_flag) {
 		if (stop_time >= 0 && ipb->output->written_time() >= stop_time) {
 			goto DRAIN;
@@ -379,11 +408,28 @@ static gboolean play(InputPlayback *ipb, const gchar *_filename, VFSFile *file, 
 			break;
 		}
 	}
+#else
+	while ( !aud_input_check_stop() ) {
+		gint jumpToTime = aud_input_check_seek();
+		if (jumpToTime != -1) {
+			seek_ctx(jumpToTime);
+        }
 
+		xmp_get_frame_info(ctx, &fi);
+        aud_input_write_audio(fi.buffer, fi.buffer_size);
+
+		if (xmp_play_frame(ctx) != 0) {
+			break;
+		}
+	}
+#endif
+
+#if _AUD_PLUGIN_VERSION < 45
 	g_mutex_lock(seek_mutex);
 	stop_flag = TRUE;
 	g_cond_signal(seek_cond);  /* wake up any waiting request */
 	g_mutex_unlock(seek_mutex);
+#endif
 
 	xmp_end_player(ctx);
 	xmp_release_module(ctx);
@@ -589,12 +635,14 @@ AUD_INPUT_PLUGIN (
 	.about_text = plugin_aud_about,
 	.prefs		= &plugin_aud_preferences,
 	.play		= play,
+#if _AUD_PLUGIN_VERSION < 45
 	.stop		= stop,
 	.pause		= mod_pause,
+	.mseek		= mseek,
+#endif
 	.probe_for_tuple = probe_for_tuple,
 	.is_our_file_from_vfs = is_our_file_from_vfs,
 	.cleanup	= cleanup,
-	.mseek		= mseek,
 	.extensions	= fmts,
 )
 
