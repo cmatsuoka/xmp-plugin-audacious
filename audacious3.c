@@ -547,10 +547,9 @@ static PreferencesWidget prefs_opts[] = {
 		.cfg_type = VALUE_BOOLEAN },
 	{ WIDGET_CHK_BTN, "Enable IT filters", &guicfg.filter,
 		NULL, NULL, FALSE, .cfg_type = VALUE_BOOLEAN},
-	{ WIDGET_LABEL, "Pan amplitude (%)", NULL, NULL, NULL, FALSE },
-	{ WIDGET_SPIN_BTN, "", &guicfg.panamp, NULL, NULL, FALSE,
+	{ WIDGET_SPIN_BTN, "Pan amplitude", .cfg = &guicfg.panamp,
       .cfg_type = VALUE_FLOAT, NULL, NULL,
-      { .spin_btn = { 0.0, 100.0, 1.0, "" } }
+      { .spin_btn = { 0.0, 100.0, 1.0, "%" } }
     },
 };
 
