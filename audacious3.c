@@ -360,12 +360,13 @@ static gboolean play(const gchar *_filename, VFSFile *file)
 
 	//plugin_cfg.time = lret;
 	xmp_get_module_info(ctx, &plugin_cfg.mod_info);
+	xmp_get_frame_info(ctx, &fi);
 
 	tuple = tuple_new_from_filename(filename);
 	g_free(filename);
 	tuple_set_str(tuple, FIELD_TITLE, NULL, plugin_cfg.mod_info.mod->name);
 	tuple_set_str(tuple, FIELD_CODEC, NULL, plugin_cfg.mod_info.mod->type);
-	tuple_set_int(tuple, FIELD_LENGTH, NULL, lret);
+	tuple_set_int(tuple, FIELD_LENGTH, NULL, fi.total_time);
 #if _AUD_PLUGIN_VERSION < 45
 	ipb->set_tuple(ipb, tuple);
 
